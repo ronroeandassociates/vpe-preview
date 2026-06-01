@@ -876,14 +876,21 @@ function parseCSVText(text) {
   return { headers, rows };
 }
 
-// Parse XLSX ArrayBuffer → { headers, rows } from first sheet
+// Parse XLSX ArrayBuffer → { headers, rows } from first sheet.
+// FTH reports have 1-3 title rows before the real header row —
+// we skip rows until we find one with 3+ non-empty cells.
 function parseXLSXBuffer(buf) {
   const wb = XLSX.read(buf, { type:"array", cellText:true, cellDates:true });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const raw = XLSX.utils.sheet_to_json(ws, { header:1, defval:"", raw:false });
   if (raw.length < 2) return { headers:[], rows:[] };
-  const headers = raw[0].map(h => String(h).trim());
-  const rows = raw.slice(1)
+  // Find real header row: first row with 3+ non-empty cells
+  let hi = 0;
+  for (let i = 0; i < Math.min(8, raw.length); i++) {
+    if (raw[i].filter(c => String(c).trim()).length >= 3) { hi = i; break; }
+  }
+  const headers = raw[hi].map(h => String(h).trim());
+  const rows = raw.slice(hi + 1)
     .map(r => Object.fromEntries(headers.map((h,i) => [h, String(r[i]??'').trim()])))
     .filter(r => Object.values(r).some(v => v !== ""));
   return { headers, rows };
@@ -892,20 +899,68 @@ function parseXLSXBuffer(buf) {
 function detectFileType(filename, headers) {
   const n = filename.toLowerCase().replace(/[\s_\-]/g,"");
   const h = headers.join("|").toLowerCase();
+  if (n.includes("roletally")||n.includes("role_tally")||n.includes("roletally")) return "roletally";
   if (n.includes("membership")||n.includes("memberlist")) return "membership";
   if (n.includes("attendance")) return "attendance";
   if (n.includes("schedule")||n.includes("meeting")) return "schedule";
   if (n.includes("roster")) return "roster";
+  // Header-based detection
   if (/first.?name|last.?name/.test(h)&&/status|paid/.test(h)) return "membership";
+  if (/^name\|/.test(h)&&/status/i.test(h)) return "membership";
+  if (/evaluator|toastmaster.*tally|general.evaluator/.test(h)&&/speaker/.test(h)) return "roletally";
   if (/present|attended/.test(h)) return "attendance";
   if (/toastmaster|speaker.?1/.test(h)) return "schedule";
   return "unknown";
 }
 
+// Returns { members:string[], officers:string[], newMembers:string[] }
+// Handles both TI CSV ("Name","Status (*)","Current Position","Member of Club Since")
+// and generic first/last name formats.
 function parseMembership(rows, headers) {
-  const firstCol=headers.find(h=>/first.?name/i.test(h)), lastCol=headers.find(h=>/last.?name/i.test(h));
-  const nameCol=headers.find(h=>/^(member.?)?name$/i.test(h)), statusCol=headers.find(h=>/^status$/i.test(h));
-  return rows.filter(r=>!statusCol||/active|honorary/i.test(r[statusCol]||"")).map(r=>{ if (firstCol&&lastCol) return `${r[firstCol]} ${r[lastCol]}`.trim(); if (nameCol) return (r[nameCol]||"").trim(); return null; }).filter(Boolean);
+  const firstCol    = headers.find(h => /first.?name/i.test(h));
+  const lastCol     = headers.find(h => /last.?name/i.test(h));
+  const nameCol     = headers.find(h => /^name$/i.test(h));
+  const statusCol   = headers.find(h => /^status/i.test(h));          // matches "Status (*)"
+  const positionCol = headers.find(h => /current.*position/i.test(h));
+  const sinceCol    = headers.find(h => /member.*since/i.test(h));    // "Member of Club Since"
+
+  const active = rows.filter(r => {
+    if (!statusCol) return true;
+    return /active|honorary|paidmember/i.test(r[statusCol] || "");
+  });
+
+  const getName = r => {
+    if (firstCol && lastCol) return `${r[firstCol]||""} ${r[lastCol]||""}`.trim();
+    if (nameCol) return (r[nameCol] || "").trim();
+    return null;
+  };
+
+  const members = active.map(getName).filter(Boolean);
+
+  // Build officer list from Current Position column
+  const officerSet = new Set();
+  if (positionCol) {
+    for (const r of active) {
+      const name = getName(r); if (!name) continue;
+      const positions = (r[positionCol] || "").split(",").map(p => p.trim().replace(/^Club /i,"")).filter(Boolean);
+      for (const pos of positions) officerSet.add(`${name} (${pos})`);
+    }
+  }
+
+  // Detect new members: joined within last 6 months
+  const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const newMembers = [];
+  if (sinceCol) {
+    for (const r of active) {
+      const name = getName(r); if (!name) continue;
+      const d = new Date(r[sinceCol] + "T12:00:00");
+      if (!isNaN(d) && d >= sixMonthsAgo) {
+        newMembers.push(`${name} | ${d.toISOString().split("T")[0]}`);
+      }
+    }
+  }
+
+  return { members, officers:[...officerSet], newMembers };
 }
 
 function detectAttendanceFormat(headers) {
@@ -913,11 +968,51 @@ function detectAttendanceFormat(headers) {
   return "wide";
 }
 function isPresent(v) { return /^(x|y|yes|1|p|present|attended|✓)$/i.test((v||"").trim()); }
+// "N/A" means not yet a member — treat as neither present nor absent
+function isMemberAtDate(v) { return !/^(n\/a|na|-)$/i.test((v||"").trim()); }
+
+// FTH Role Tally: col 0 = member name, cols 1+ = "total / withSpeech" role counts
+function parseRoleTally(rows, headers) {
+  // headers[0] is blank; headers[1..] are role names
+  const nameKey = headers[0]; // "" — the member name column
+  const roleKeys = headers.slice(1).filter(Boolean);
+  const members = [];
+  for (const r of rows) {
+    const name = (r[nameKey] || "").trim(); if (!name) continue;
+    const roleCounts = {};
+    for (const rk of roleKeys) {
+      const val = (r[rk] || "").trim();
+      const match = val.match(/^(\d+)/);
+      roleCounts[rk] = match ? parseInt(match[1]) : 0;
+    }
+    members.push({ name, roleCounts });
+  }
+  return members;
+}
+
+// FTH Schedule: col 0 = role, col 1 = member; date appears in first row col 0
+function parseFTHSchedule(rows, headers) {
+  const dates = []; const assignments = [];
+  // The raw sheet has date in row[0][0], then role:member pairs
+  // parseXLSXBuffer would have put date as a "header" key and lose it
+  // Instead we work with what we get: look for ISO dates in header keys
+  for (const h of headers) {
+    const d = new Date(h); if (!isNaN(d)) dates.push(d);
+  }
+  return dates.sort((a,b)=>a-b);
+}
 
 function parseWideAttendance(rows, headers) {
-  const nc=headers.find(h=>/name|member/i.test(h))||headers[0], dc=headers.filter(h=>h!==nc);
-  const counts={};
-  for (const r of rows) { const n=(r[nc]||"").trim(); if (!n) continue; counts[n]=dc.filter(c=>isPresent(r[c])).length; }
+  // FTH attendance: col[0] key is "" (blank), date strings in the rest
+  const nc = headers.find(h => /name|member/i.test(h)) || headers[0];
+  const dc = headers.filter(h => h !== nc);
+  const counts = {};
+  for (const r of rows) {
+    const n = (r[nc] || "").trim(); if (!n) continue;
+    // Only count meetings where member WAS a member (not N/A)
+    const eligible = dc.filter(c => isMemberAtDate(r[c]));
+    counts[n] = eligible.filter(c => isPresent(r[c])).length;
+  }
   return counts;
 }
 function parseLongAttendance(rows, headers) {
@@ -944,10 +1039,11 @@ function detectCadenceFromDates(dates) {
 
 // ─── CSVImportPanel ────────────────────────────────────────────────────────────
 
-const TYPE_CHIP = { membership:"bg-slate-100 text-slate-700", attendance:"bg-blue-100 text-blue-700", schedule:"bg-green-100 text-green-700", roster:"bg-purple-100 text-purple-700", unknown:"bg-amber-100 text-amber-700" };
+const TYPE_CHIP = { membership:"bg-slate-100 text-slate-700", roletally:"bg-indigo-100 text-indigo-700", attendance:"bg-blue-100 text-blue-700", schedule:"bg-green-100 text-green-700", roster:"bg-purple-100 text-purple-700", unknown:"bg-amber-100 text-amber-700" };
 
 function filePreviewLine(f) {
-  if (f.type==="membership") return `${f.members?.length??0} active members`;
+  if (f.type==="membership") return `${f.members?.length??0} active members · ${f.officers?.length??0} officers · ${f.newMembers?.length??0} new (≤6 mo)`;
+  if (f.type==="roletally") return `${f.members?.length??0} members with role history`;
   if (f.type==="attendance") return `${Object.keys(f.attendanceCounts??{}).length} members tracked · ${f.format} format`;
   if (f.type==="schedule") return f.scheduleInfo ? `${f.scheduleInfo.meetingCount} meetings · ${cadenceLabel(f.scheduleInfo.cadence)} · from ${f.scheduleInfo.startDate}` : "No date column detected";
   if (f.type==="roster") return "Loaded (officer pool support coming in Phase 6)";
@@ -968,7 +1064,8 @@ function CSVImportPanel({ onApply }) {
         : parseCSVText(e.target.result);
       const type = detectFileType(file.name, headers);
       let p = { name:file.name, type };
-      if (type==="membership") p.members=parseMembership(rows,headers);
+      if (type==="membership") { const m=parseMembership(rows,headers); p.members=m.members; p.officers=m.officers; p.newMembers=m.newMembers; }
+      else if (type==="roletally") { const rt=parseRoleTally(rows,headers); p.members=rt.map(m=>m.name); p.roleTally=rt; }
       else if (type==="attendance") { p.format=detectAttendanceFormat(headers); p.attendanceCounts=parseAttendance(rows,headers); }
       else if (type==="schedule") { const dates=parseScheduleDates(rows,headers); p.scheduleInfo=dates.length>0?{ startDate:dates[0].toISOString().split("T")[0], meetingCount:dates.length, ...detectCadenceFromDates(dates) }:null; }
       setFiles(prev=>{ const f=type==="unknown"?prev:prev.filter(x=>x.type!==type); return [...f,p]; });
@@ -1083,10 +1180,12 @@ export default function ToastmastersVpeAgendaEngine() {
   }, [cadence]);
 
   const applyImport = useCallback((payload) => {
-    if (payload.members?.length) setMembersText(payload.members.join("\n"));
-    if (payload.startDate) setStartDate(payload.startDate);
-    if (payload.meetingCount) setMeetingCount(payload.meetingCount);
-    if (payload.cadence) setCadence(payload.cadence);
+    if (payload.members?.length)    setMembersText(payload.members.join("\n"));
+    if (payload.officers?.length)   setOfficersText(payload.officers.join("\n"));
+    if (payload.newMembers?.length) setNewMembersText(payload.newMembers.join("\n"));
+    if (payload.startDate)          setStartDate(payload.startDate);
+    if (payload.meetingCount)       setMeetingCount(payload.meetingCount);
+    if (payload.cadence)            setCadence(payload.cadence);
     if (payload.weekday !== undefined) setWeekday(payload.weekday);
     setImportOpen(false);
   }, []);
