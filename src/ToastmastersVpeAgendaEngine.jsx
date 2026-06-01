@@ -542,17 +542,18 @@ function selectWordFromBank(base, level, usedIds, bank) {
 function buildThemePackageFromBank(base, level, usedIds, bank) {
   const std = selectWordFromBank(base, "standard", usedIds, bank);
   const adv = selectWordFromBank(base, "advanced", usedIds, bank);
-  const primary = level === "advanced" ? adv : std;
+  const primary   = level === "advanced" ? adv : std;
   const secondary = level === "advanced" ? std : adv;
   return {
     ...base,
-    wordOfDay:    primary?.word    || base.word,
-    advancedWord: secondary?.word  || base.advanced,
-    partOfSpeech: primary?.partOfSpeech || base.partOfSpeech,
-    definition:   primary?.definition   || base.definition,
-    example:      primary?.example      || base.example,
-    difficulty:   level === "mixed" ? "Mixed" : level === "advanced" ? "Advanced" : "Professional",
-    wordBankIds:  [std?.id, adv?.id].filter(Boolean),
+    wordOfDay:          primary?.word         || base.word,
+    advancedWord:       secondary?.word        || base.advanced,
+    partOfSpeech:       primary?.partOfSpeech  || base.partOfSpeech,
+    definition:         primary?.definition    || base.definition,
+    example:            primary?.example       || base.example,
+    advancedDefinition: secondary?.definition  || inlineAdvancedDefs[secondary?.word || base.advanced] || "",
+    difficulty:         level === "mixed" ? "Mixed" : level === "advanced" ? "Advanced" : "Professional",
+    wordBankIds:        [std?.id, adv?.id].filter(Boolean),
   };
 }
 
@@ -635,10 +636,191 @@ function horizonToCount(horizon, cadence) {
   return Math.round(months * monthRate);
 }
 
+// ─── inline advanced-word definitions (one per theme-library entry) ────────────
+const inlineAdvancedDefs = {
+  // Cycle 1 — Formation
+  Prescience:"The ability to know or sense what will happen before it does.",
+  Intentionality:"The quality of acting with deliberate purpose rather than by habit or accident.",
+  Trajectory:"The path or arc that growth, a speech, or a career follows over time.",
+  Recalibrate:"To adjust one's approach or direction based on feedback and new conditions.",
+  Fortitude:"Mental strength that allows a person to endure difficulty without giving in.",
+  Enterprise:"The readiness and initiative to take on bold or challenging projects.",
+  Intrepid:"Fearlessly determined in the face of risk or uncertainty.",
+  Equanimous:"Calm and composed even in difficult or chaotic situations.",
+  Repetition:"Repeating an action deliberately to build automatic, reliable skill.",
+  Meticulous:"Extremely careful and precise about every detail and step of preparation.",
+  Punctilious:"Strictly attentive to correct behavior, rules, and proper conduct.",
+  Assiduous:"Diligent and persistent in effort, showing dedicated, patient attention.",
+  Stewardship:"The careful management and development of something entrusted to one's care.",
+  Persuasion:"The use of reasoning and emotional appeal to change belief or action.",
+  Authenticity:"The quality of being genuine, truthful, and consistently true to oneself.",
+  Answerable:"Responsible and obligated to explain one's decisions to those affected by them.",
+  Cogent:"Logically clear, well-structured, and convincingly expressed.",
+  Articulate:"Able to express thoughts clearly, precisely, and effectively in speech.",
+  Attentive:"Actively focused and carefully listening to what is being said.",
+  Evocative:"Bringing strong images, memories, or feelings to mind through language.",
+  Synergy:"The combined effort of a group that produces more than each member could alone.",
+  Dependable:"Consistently trustworthy and reliably present when counted on.",
+  Diplomacy:"The art of handling disagreements with tact, care, and mutual respect.",
+  Reciprocity:"A mutual exchange in which both parties give, support, and benefit.",
+  Inheritance:"Values, standards, and culture passed from earlier members to those who follow.",
+  Consequence:"A result that follows from an action, especially one that shapes what comes next.",
+  Cultivate:"To develop something gradually through sustained care, attention, and investment.",
+  Perennial:"Lasting across many seasons or years; reliably recurring.",
+  Ingenuity:"The ability to find clever, original solutions to difficult problems.",
+  Versatile:"Easily adapting to many different roles, situations, or styles.",
+  Iterate:"To improve something by repeating a cycle of testing and thoughtful adjustment.",
+  Resourceful:"Finding effective solutions using whatever tools, knowledge, or relationships are available.",
+  Sagacity:"The quality of sound judgment developed through experience and reflection.",
+  Discernment:"The ability to perceive fine differences and judge wisely between options.",
+  Circumspect:"Careful to consider all possible factors before acting or speaking.",
+  Pragmatic:"Focused on what actually works in practice rather than on theory or ideal.",
+  // Cycle 2 — Mastery
+  Narrative:"A structured account or story that gives meaning and arc to events.",
+  Pathos:"An appeal to the emotions of an audience that creates genuine connection.",
+  Granular:"Detailed to the level of specific, concrete, and observable particulars.",
+  Denouement:"The final resolution of a story where tension is released and meaning lands.",
+  Rhetoric:"The art and craft of effective, persuasive speaking and writing.",
+  Syllogism:"A logical argument that draws a certain conclusion from two accepted premises.",
+  Aphorism:"A short, memorable statement expressing a general truth about human experience.",
+  Anaphora:"The repetition of a word or phrase at the start of consecutive clauses for rhythm.",
+  Gravitas:"A dignified weight and seriousness of manner that commands respect.",
+  Authoritative:"Commanding confidence and trust through knowledge, preparation, and manner.",
+  Sangfroid:"Composure and calm confidence maintained in high-pressure situations.",
+  Congruent:"Aligned between words, tone, and actions — consistent in all directions.",
+  Prescient:"Showing knowledge of what will happen before it becomes visible to others.",
+  Telos:"The ultimate purpose or goal that gives meaning and direction to an institution.",
+  Cohesion:"The quality of forming a unified, well-integrated, and mutually supporting whole.",
+  Criterion:"A principle or standard used to judge the quality or success of something.",
+  Operationalize:"To convert a strategy or idea into a practical, executable plan of action.",
+  Exigency:"An urgent situation that demands immediate attention, decision, or action.",
+  Contingent:"Depending on uncertain or variable conditions that may shift without warning.",
+  Protocol:"A set of established rules or procedures that govern how things should be done.",
+  Dialectic:"A method of examining and resolving opposing ideas through reasoned discussion.",
+  Discourse:"Formal exchange of ideas and perspectives through extended speech or writing.",
+  Consensus:"General agreement reached through open discussion among all relevant parties.",
+  Reconcile:"To bring opposing positions into a relationship of mutual understanding or acceptance.",
+  Ethos:"The characteristic spirit, values, and identity of a community or culture.",
+  Convention:"An established practice that communicates a group's priorities and accepted norms.",
+  Hospitality:"The generous, warm reception of others as a practice and cultural expression.",
+  Benchmark:"A reference point used to measure and compare levels of performance.",
+  Steward:"To care for and protect something responsibly on behalf of those who will follow.",
+  Chronicle:"To record events in order, creating a lasting account for the future.",
+  Handoff:"The deliberate transfer of responsibility, knowledge, or authority from one person to another.",
+  Endow:"To provide with a lasting quality, capability, or resource that outlasts the giver.",
+  Catalyze:"To cause or significantly accelerate a process or change through enabling action.",
+  Actualize:"To make real or concrete what was previously only an intention or vision.",
+  Accretion:"Growth through the steady accumulation of small improvements over time.",
+  Testament:"Clear evidence or proof of a quality, a commitment, or a sustained achievement.",
+};
+
+// ─── html banner helpers ────────────────────────────────────────────────────────
+
+// ─── PR & Promotion helpers ───────────────────────────────────────────────────
+
+function escHtml(s) {
+  return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function generateMeetingNote(t, campaignNote) {
+  if (campaignNote?.trim()) return campaignNote.trim();
+  if (t.cycle && t.arc && t.monthlyTheme) return `${t.cycle} Cycle — ${t.arc} Arc — Monthly Theme: ${t.monthlyTheme}`;
+  return "Come prepared to speak, listen, evaluate, and grow.";
+}
+
+function buildClubLine(id) {
+  return [id.clubName, id.clubNumber ? `Club ${id.clubNumber}` : null, id.area ? `Area ${id.area}` : null, id.division ? `Division ${id.division}` : null, id.district ? `District ${id.district}` : null].filter(Boolean).join(" | ");
+}
+
+function generateBannerHTML(meeting, identity, campaignNote) {
+  const t   = meeting.themePackage;
+  const th  = escHtml(t.theme);
+  const w   = escHtml(t.wordOfDay);
+  const wd  = escHtml(t.definition);
+  const aw  = escHtml(t.advancedWord);
+  const awd = escHtml(t.advancedDefinition || "");
+  const mn  = escHtml(generateMeetingNote(t, campaignNote));
+  const cl  = escHtml(buildClubLine(identity));
+  return `<div style="background:#ffffff;border-left:6px solid #772432;border-right:6px solid #005e9e;padding:10px 14px;margin:12px 0;font-family:Arial, sans-serif;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;font-size:14px;box-shadow:0 4px 10px rgba(0,0,0,.12);"><div style="font-weight:bold;color:#772432;">Theme: ${th}</div><div style="color:#333;"><strong>Word:</strong> <span style="color:#005e9e;">${w}</span> &mdash; <span style="color:#555;">${wd}</span></div><div style="color:#333;"><strong>Advanced:</strong> <span style="color:#005e9e;">${aw}</span>${awd?` &mdash; <span style="color:#555;">${awd}</span>`:""}</div><div style="color:#555;font-size:13px;width:100%;margin-top:6px;text-align:center;"><em>${mn}</em></div>${cl?`<div style="color:#777;font-size:11px;width:100%;text-align:center;margin-top:2px;">${cl}</div>`:""}</div>`;
+}
+
+function generateFBPost(meeting, identity, campaignNote) {
+  const t = meeting.themePackage;
+  const mn = generateMeetingNote(t, campaignNote);
+  let out = `Join us ${formatDate(meeting.date)} for a Toastmasters meeting.\n\nTheme: ${t.theme}\nWord of the Day: ${t.wordOfDay}\nAdvanced Word: ${t.advancedWord}\n\nThis week, we explore how "${t.wordOfDay}" connects to communication, leadership, and personal growth.\n\nGuests are welcome.`;
+  if (campaignNote?.trim()) out += `\n\n${campaignNote.trim()}`;
+  else if (t.cycle && t.arc) out += `\n\n${mn}`;
+  return out;
+}
+
+function generateWebsiteCopy(meeting, identity, campaignNote) {
+  const t = meeting.themePackage;
+  const mn = generateMeetingNote(t, campaignNote);
+  let out = `Join us for our next Toastmasters meeting on ${formatDate(meeting.date)}.\n\nTheme: ${t.theme}\nWord of the Day: ${t.wordOfDay}\nAdvanced Word: ${t.advancedWord}\n\nThis ${meeting.type} gives members and guests the opportunity to practice prepared speaking, impromptu speaking, evaluations, and leadership in a supportive environment.`;
+  if (identity.meetingLink?.trim()) out += `\n\nMeeting Link: ${identity.meetingLink.trim()}`;
+  if (campaignNote?.trim()) out += `\n\nSpecial Focus: ${campaignNote.trim()}`;
+  else out += `\n\n${mn}`;
+  return out;
+}
+
+function generateEmail(meeting, identity, campaignNote) {
+  const t = meeting.themePackage;
+  const mn = generateMeetingNote(t, campaignNote);
+  const cl = buildClubLine(identity);
+  return `Subject: Upcoming Toastmasters Meeting – ${t.theme}\n\nDear [Member],\n\nOur next Toastmasters meeting is ${formatDate(meeting.date)}.\n\nTheme: ${t.theme}\nWord of the Day: ${t.wordOfDay} (${t.partOfSpeech})\nAdvanced Word: ${t.advancedWord}\n\nMeeting Format:\n${meeting.description}\n\nPlease confirm your agenda role and update your speech title, Pathways project, or introduction if needed.\n\n${mn}\n\nThank you,\n${cl}`;
+}
+
+function generateGraphicText(meeting, identity, campaignNote) {
+  const t = meeting.themePackage;
+  const lines = [t.theme, formatDate(meeting.date), "", `Word of the Day:`, t.wordOfDay, "", `Advanced Word:`, t.advancedWord, "", meeting.type];
+  if (identity.clubName) lines.push("", identity.clubName);
+  if (identity.clubNumber) lines.push(`Club ${identity.clubNumber}`);
+  return lines.join("\n");
+}
+
+function generateCanvaBrief(meeting, identity, campaignNote) {
+  const t = meeting.themePackage;
+  const mn = generateMeetingNote(t, campaignNote);
+  return `Create a Toastmasters meeting announcement graphic.\n\nHeadline:\n${t.theme}\n\nSubheadline:\n${meeting.type}\n\nDate and Time:\n${formatDate(meeting.date)}\n\nWord of the Day:\n${t.wordOfDay}\n\nAdvanced Word:\n${t.advancedWord}\n\nClub Identity:\n${buildClubLine(identity)}\n\nDesign Direction:\nUse a clean, professional Toastmasters-aligned design. Emphasize the theme and date. Keep the graphic uncluttered and readable on mobile.\n\nPreferred Colors:\nMaroon: #772432\nBlue: #005e9e\nWhite: #ffffff\nNeutral text: #333333\n\nNote:\n${mn}\n\nDo not include full definitions or long paragraphs on the graphic.`;
+}
+
+function generateGuestInvite(meeting, identity, campaignNote) {
+  const t = meeting.themePackage;
+  let out = `You are invited to join us for Toastmasters on ${formatDate(meeting.date)}.\n\nTheme: ${t.theme}\nWord of the Day: ${t.wordOfDay}\n\nIt is a supportive place to practice speaking, listening, and leadership. Guests are welcome.`;
+  if (identity.meetingLink?.trim()) out += `\n\nJoin online: ${identity.meetingLink.trim()}`;
+  return out;
+}
+
+function generateVisualPrompts(meeting, identity, campaignNote) {
+  const t = meeting.themePackage;
+  const d = formatDate(meeting.date);
+  const cl = buildClubLine(identity);
+  const mn = generateMeetingNote(t, campaignNote);
+  const colors = "Colors:\nToastmasters maroon #772432, blue #005e9e, white #ffffff, dark neutral #333333.";
+  return {
+    hero: `Create a professional Toastmasters meeting advertisement graphic for the theme "${t.theme}."\n\nVisual concept:\nA clean, forward-looking scene representing vision, preparation, communication, and personal growth. Use subtle imagery such as a pathway, horizon, light through a window, compass, telescope, or microphone. The design should feel optimistic, polished, and leadership-oriented.\n\nText to include:\n${t.theme}\n${d}\nWord of the Day: ${t.wordOfDay}\nAdvanced Word: ${t.advancedWord}\n${cl}\n\nStyle:\nProfessional, modern, Toastmasters-aligned, clean layout, readable on mobile.\n${colors}\n\nAvoid:\nClutter, cartoonish imagery, tiny text, full definitions, excessive icons.`,
+    openingSlide: `Create a 16:9 opening slide for a Toastmasters meeting deck.\n\nTheme:\n${t.theme}\n\nVisual concept:\nA polished presentation slide introducing the meeting theme with a strong sense of direction and leadership growth. Use a simple background with visual cues of vision and forward movement — horizon line, pathway, light beam, or abstract pattern.\n\nText to include:\n${t.theme}\n${meeting.type}\n${d}\n\nOptional footer:\n${cl}\n\nStyle:\nClean, presentation-ready, professional, high contrast, minimal text, suitable for Zoom or projector.\n${colors}\nFormat: 16:9 widescreen.`,
+    wordSlide: `Create a 16:9 Word of the Day slide for a Toastmasters meeting.\n\nWord of the Day:\n${t.wordOfDay}\n\nPart of Speech:\n${t.partOfSpeech}\n\nDefinition:\n${t.definition}\n\nUsage:\n${t.example || "(See meeting agenda)"}\n\nAdvanced Word:\n${t.advancedWord}\n\nVisual concept:\nA clean educational vocabulary slide. Use subtle imagery connected to the theme "${t.theme}" and the idea of preparation, communication, and vision.\n\nText hierarchy:\n1. Word of the Day: ${t.wordOfDay}\n2. Definition\n3. Usage sentence\n4. Advanced Word: ${t.advancedWord}\n\nStyle:\nClear, readable, professional, educational.\n${colors}\nFormat: 16:9 widescreen.`,
+    guestGraphic: `Create a public-facing guest invitation graphic for a Toastmasters meeting.\n\nTheme:\n${t.theme}\n\nMessage:\nGuests are welcome.\n\nVisual concept:\nShow communication, confidence, and personal growth in a welcoming environment. Use visual elements such as a microphone, conversation circles, open doorway, or people gathered in a supportive setting.\n\nText to include:\nGuests Welcome\n${t.theme}\n${d}\nPractice Speaking • Listening • Leadership\n\nOptional footer:\n${identity.clubName || ""}\n\nStyle:\nWarm but professional, encouraging, clean, accessible, mobile-readable.\n${colors}\n\nAvoid:\nIntimidating stage imagery, overly formal corporate photography, too much text.`,
+    closing: `Create a closing or reminder visual for a Toastmasters meeting deck and social follow-up.\n\nTheme:\n${t.theme}\n\nVisual concept:\nA forward-looking closing image reinforcing continued growth and action. Use imagery such as a path continuing into the distance, sunrise, open notebook, compass, or speaker preparing for the next opportunity.\n\nText to include:\nKeep Looking Ahead\nTheme: ${t.theme}\nWord: ${t.wordOfDay}\nNext Step: Speak • Listen • Evaluate • Grow\n\nOptional footer:\n${cl}\n\nNote:\n${mn}\n\nStyle:\nProfessional, calm, motivational, clean.\n${colors}\n\nFormat:\nCreate versions suitable for both 16:9 slide and square social media post.`,
+  };
+}
+
 function buildThemePackage(base, level) {
-  if (level === "standard") return { ...base, wordOfDay:base.word, advancedWord:base.advanced, difficulty:"Professional" };
-  if (level === "advanced") return { ...base, wordOfDay:base.advanced, advancedWord:base.word, difficulty:"Advanced" };
-  return { ...base, wordOfDay:base.word, advancedWord:base.advanced, difficulty:"Mixed" };
+  const isAdv   = level === "advanced";
+  const primary = isAdv ? base.advanced : base.word;
+  const second  = isAdv ? base.word     : base.advanced;
+  const primDef = isAdv ? (inlineAdvancedDefs[base.advanced] || base.definition) : base.definition;
+  const advDef  = isAdv ? base.definition : (inlineAdvancedDefs[base.advanced] || "");
+  return {
+    ...base,
+    wordOfDay:          primary,
+    advancedWord:       second,
+    definition:         primDef,
+    advancedDefinition: advDef,
+    partOfSpeech:       base.partOfSpeech,
+    difficulty:         level === "mixed" ? "Mixed" : isAdv ? "Advanced" : "Professional",
+  };
 }
 
 function getAgendaTemplate(pattern, week, index) {
@@ -848,6 +1030,27 @@ export default function ToastmastersVpeAgendaEngine() {
   const [newMembersText, setNewMembersText] = useState("");
   const [lockedWeeks, setLockedWeeks]     = useState(2);
   const [wordBankEnabled, setWordBankEnabled] = useState(false);
+  // Club identity
+  const [clubNumber, setClubNumber]       = useState("###");
+  const [area, setArea]                   = useState("#");
+  const [division, setDivision]           = useState("#");
+  const [district, setDistrict]           = useState("##");
+  const [region, setRegion]               = useState("#");
+  const [meetingLink, setMeetingLink]     = useState("");
+  // PR settings
+  const [campaignNote, setCampaignNote]   = useState("");
+  const [campaignName, setCampaignName]   = useState("");
+  // PR panel open state
+  const [openPR, setOpenPR]               = useState(new Set());
+  const [openPROutputs, setOpenPROutputs] = useState({});
+
+  const togglePR = (key) => setOpenPR(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const togglePROutput = (key, output) => setOpenPROutputs(prev => {
+    const cur = new Set(prev[key] || []); cur.has(output) ? cur.delete(output) : cur.add(output);
+    return { ...prev, [key]: cur };
+  });
+
+  const clubIdentity = useMemo(() => ({ clubName, clubNumber, area, division, district, region, meetingLink }), [clubName, clubNumber, area, division, district, region, meetingLink]);
 
   const themePool = libraryMode === "master" ? masterPool : corePool;
 
@@ -1163,6 +1366,50 @@ export default function ToastmastersVpeAgendaEngine() {
                 <span className="text-xs text-slate-400">First {lockedCount} meeting(s) locked — confirmed and not adjusted</span>
               </label>
             </div>
+
+            {/* PR & Promotion Settings */}
+            <div className="space-y-4 border-t border-slate-200 pt-4">
+              <div className="flex items-center gap-2">
+                <ClipboardList size={18} style={{color:TM.maroon}}/>
+                <h2 className="text-lg font-semibold">PR &amp; Promotion</h2>
+              </div>
+              <p className="text-xs text-slate-500">Club identity and campaign details power all 8 PR export formats on each meeting card.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block space-y-1 col-span-2">
+                  <span className="text-xs font-medium text-slate-600">Club Number</span>
+                  <input value={clubNumber} onChange={e=>setClubNumber(e.target.value)} placeholder="148" className={inputCls}/>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-slate-600">Area</span>
+                  <input value={area} onChange={e=>setArea(e.target.value)} placeholder="3" className={inputCls}/>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-slate-600">Division</span>
+                  <input value={division} onChange={e=>setDivision(e.target.value)} placeholder="T" className={inputCls}/>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-slate-600">District</span>
+                  <input value={district} onChange={e=>setDistrict(e.target.value)} placeholder="16" className={inputCls}/>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-slate-600">Region</span>
+                  <input value={region} onChange={e=>setRegion(e.target.value)} placeholder="3" className={inputCls}/>
+                </label>
+              </div>
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-slate-600">Meeting Link (optional)</span>
+                <input value={meetingLink} onChange={e=>setMeetingLink(e.target.value)} placeholder="https://zoom.us/j/..." className={inputCls}/>
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-slate-600">Active Campaign Name</span>
+                <input value={campaignName} onChange={e=>setCampaignName(e.target.value)} placeholder="Beat the Clock · Smedley Award · Open House" className={inputCls}/>
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-slate-600">Campaign / Program Note</span>
+                <input value={campaignNote} onChange={e=>setCampaignNote(e.target.value)} placeholder="e.g. Invite a guest and earn credit toward the Smedley Award." className={inputCls}/>
+                <span className="text-xs text-slate-400">Leave blank to auto-generate from cycle / arc / monthly theme</span>
+              </label>
+            </div>
           </aside>
 
           {/* ── main content ── */}
@@ -1228,8 +1475,13 @@ export default function ToastmastersVpeAgendaEngine() {
                 const t=meeting.themePackage;
                 const isMastery = t.cycle==="Mastery";
                 const isLocked = idx < lockedCount;
+                const prKey = meeting.date.toISOString();
+                const prOpen = openPR.has(prKey);
+                const prOutputs = openPROutputs[prKey] || new Set();
+                const bannerHtml = generateBannerHTML(meeting, clubIdentity, campaignNote);
+                const vp = generateVisualPrompts(meeting, clubIdentity, campaignNote);
                 return (
-                  <React.Fragment key={meeting.date.toISOString()}>
+                  <React.Fragment key={prKey}>
                   {idx===lockedCount&&lockedCount>0&&(
                     <div className="flex items-center gap-3 py-1">
                       <div className="flex-1 border-t-2 border-dashed border-amber-300"/>
@@ -1297,6 +1549,58 @@ export default function ToastmastersVpeAgendaEngine() {
                           </tbody>
                         </table>
                       </div>
+                    </div>
+                    {/* PR & Promotion Exports */}
+                    <div className="border-t border-slate-100">
+                      <button onClick={()=>togglePR(prKey)}
+                        className="flex w-full items-center justify-between px-5 py-3 text-sm font-semibold hover:bg-slate-50 transition-colors"
+                        style={{color:TM.maroon}}>
+                        <span>📣 PR &amp; Promotion Exports {isLocked&&<span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">Locked</span>}</span>
+                        <span className="text-xs font-normal text-slate-400">{prOpen?"▲ hide":"▼ show"}</span>
+                      </button>
+                      {prOpen&&(
+                        <div className="border-t border-slate-100 px-5 pb-5 space-y-2 pt-3">
+                          {[
+                            { id:"banner",   label:"📋 FreeToastHost HTML Banner",      text: bannerHtml,                                        isHtml:true },
+                            { id:"fb",       label:"👥 Facebook / Social Post",         text: generateFBPost(meeting, clubIdentity, campaignNote)         },
+                            { id:"website",  label:"🌐 Website Event Copy",             text: generateWebsiteCopy(meeting, clubIdentity, campaignNote)    },
+                            { id:"email",    label:"✉️ Member Email Announcement",      text: generateEmail(meeting, clubIdentity, campaignNote)          },
+                            { id:"graphic",  label:"🖼️ Graphic Text",                  text: generateGraphicText(meeting, clubIdentity, campaignNote)     },
+                            { id:"canva",    label:"🎨 Canva / Designer Brief",         text: generateCanvaBrief(meeting, clubIdentity, campaignNote)      },
+                            { id:"invite",   label:"📩 Short Guest Invitation",         text: generateGuestInvite(meeting, clubIdentity, campaignNote)     },
+                            { id:"vp1",      label:"🖼 Visual 1 — Hero Ad Graphic",     text: vp.hero             },
+                            { id:"vp2",      label:"📽 Visual 2 — Opening Slide",       text: vp.openingSlide     },
+                            { id:"vp3",      label:"📖 Visual 3 — Word of the Day",     text: vp.wordSlide        },
+                            { id:"vp4",      label:"🤝 Visual 4 — Guest Invite Graphic",text: vp.guestGraphic     },
+                            { id:"vp5",      label:"✅ Visual 5 — Closing / Reminder",  text: vp.closing          },
+                          ].map(({id,label,text,isHtml})=>{
+                            const open = prOutputs.has(id);
+                            return (
+                              <div key={id} className="rounded-xl border border-slate-200 overflow-hidden">
+                                <button onClick={()=>togglePROutput(prKey,id)}
+                                  className="flex w-full items-center justify-between px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
+                                  <span>{label}</span>
+                                  <span className="text-slate-400">{open?"▲":"▼"}</span>
+                                </button>
+                                {open&&(
+                                  <div className="border-t border-slate-100 bg-slate-50 px-4 pb-4 pt-3 space-y-3">
+                                    {isHtml&&<div dangerouslySetInnerHTML={{__html:text}}/>}
+                                    <div className="relative">
+                                      <textarea readOnly value={text} rows={isHtml?3:6}
+                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-600 resize-none focus:outline-none"/>
+                                      <button onClick={()=>navigator.clipboard.writeText(text)}
+                                        className="absolute right-2 top-2 rounded-lg px-2.5 py-1 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                                        style={{backgroundColor:TM.maroon}}>
+                                        Copy
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </motion.article>
                   </React.Fragment>
