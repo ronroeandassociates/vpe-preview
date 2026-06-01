@@ -834,28 +834,67 @@ function getAgendaTemplate(pattern, week, index) {
   return agendaTemplates.standard;
 }
 
-function assignRole(role, members, officers, mi, ri, mode) {
-  const sm = members.length > 0 ? members : ["Open"];
-  const so = officers.length > 0 ? officers : ["Officer / Open"];
-  const mp = sm[(mi + ri) % sm.length];
-  const op = so[mi % so.length];
-  const bk = so[(mi + 1) % so.length];
-  if (role === "Presiding Officer") {
-    if (mode === "fixedPresident") return so[0] || "President";
-    if (mode === "officerRotation") return op;
-    if (mode === "qualifiedMemberRotation") return `${mp} / Backup: ${bk}`;
-    if (mode === "combinedWithToastmaster") return "Combined with Toastmaster";
-    return "Open / Manual Assignment";
-  }
-  if (role === "Toastmaster" && mode === "combinedWithToastmaster") return `${mp} / Presiding`;
-  if (role.includes("VPE")||role.includes("VPM")||role.includes("VPPR")||role.includes("Secretary")||role.includes("Treasurer")) return op;
-  return mp;
+// ─── Role progression ladder (easiest → hardest) ─────────────────────────────
+const ROLE_PROGRESSION = [
+  "Timer", "Ah-Counter", "Grammarian",
+  "Evaluator 3", "Evaluator 2", "Evaluator 1",
+  "General Evaluator", "Table Topicsmaster", "Toastmaster",
+];
+
+function isSpeakerRole(role) {
+  return /^(speaker|featured.?speaker|showcase.?speaker|workshop.?speaker|contest.?speaker)\s*[\d#]*/i.test(role.trim());
 }
 
-function assignRoles(roles, members, officers, mi, mode, onboardingMap = {}) {
+// Two-track role assignment:
+//   Track A — Speakers: rotate from a separate speaker queue (3-week no-repeat)
+//   Track B — Progression: everyone else rotates Timer→…→Toastmaster each meeting
+//
+// speakerPool: array of member names already chosen as speakers this meeting
+function assignRoles(roles, members, officers, mi, mode, onboardingMap = {}, speakerPool = []) {
+  const sm  = members.length  > 0 ? members  : ["Open"];
+  const so  = officers.length > 0 ? officers : ["Officer / Open"];
+
+  // Non-speakers this meeting advance through the progression ladder
+  const speakerSet  = new Set(speakerPool);
+  const nonSpeakers = sm.filter(m => !speakerSet.has(m));
+  const ns          = nonSpeakers.length > 0 ? nonSpeakers : sm;
+
+  let speakerIdx = 0;
+
   return roles.map((role, ri) => {
+    // 1. Onboarding override
     if (onboardingMap[role]) return { role, member: onboardingMap[role], isOnboarding: true };
-    return { role, member: assignRole(role, members, officers, mi, ri, mode), isOnboarding: false };
+
+    // 2. Presiding Officer — always from officer pool
+    if (role === "Presiding Officer") {
+      if (mode === "fixedPresident")           return { role, member: so[0] || "President", isOnboarding: false };
+      if (mode === "officerRotation")          return { role, member: so[mi % so.length], isOnboarding: false };
+      if (mode === "qualifiedMemberRotation")  return { role, member: `${sm[mi % sm.length]} / Backup: ${so[(mi+1) % so.length]}`, isOnboarding: false };
+      if (mode === "combinedWithToastmaster")  return { role, member: "Combined with Toastmaster", isOnboarding: false };
+      return { role, member: "Open / Manual Assignment", isOnboarding: false };
+    }
+    if (role === "Toastmaster" && mode === "combinedWithToastmaster") {
+      return { role, member: `${sm[mi % sm.length]} / Presiding`, isOnboarding: false };
+    }
+    if (/VPE|VPM|VPPR|Secretary|Treasurer/i.test(role)) {
+      return { role, member: so[mi % so.length], isOnboarding: false };
+    }
+
+    // 3. Speaker slots — filled from pre-selected speakerPool
+    if (isSpeakerRole(role)) {
+      const member = speakerPool[speakerIdx] || "Open";
+      speakerIdx++;
+      return { role, member, isOnboarding: false };
+    }
+
+    // 4. Progression ladder — non-speakers rotate through Timer→…→Toastmaster
+    const progIdx = ROLE_PROGRESSION.indexOf(role);
+    if (progIdx >= 0 && ns.length > 0) {
+      return { role, member: ns[(mi + progIdx) % ns.length], isOnboarding: false };
+    }
+
+    // 5. Fallback for any other named role
+    return { role, member: sm[(mi + ri) % sm.length], isOnboarding: false };
   });
 }
 
@@ -1195,7 +1234,10 @@ export default function ToastmastersVpeAgendaEngine() {
 
   const schedule = useMemo(() => {
     const dates = getNextDates(startDate, Number(meetingCount), Number(weekday), cadence);
-    const usedWordIds = new Set();
+    const usedWordIds   = new Set();
+    // Speaker track state: persists across meetings within this schedule build
+    const speakerLastMeeting = {}; // member → meeting index of last speaking slot
+
     return dates.map((date, i) => {
       const week = ordinalWeekOfMonth(date);
       const base = themePool[(Number(themeStartIndex) + i) % themePool.length];
@@ -1203,8 +1245,9 @@ export default function ToastmastersVpeAgendaEngine() {
         ? buildThemePackageFromBank(base, vocabularyLevel, usedWordIds, wordBank)
         : buildThemePackage(base, vocabularyLevel);
       const tpl = getAgendaTemplate(pattern, week, i);
-      // Build onboarding priority map: roleKey → member name
-      const onboardingMap = {};
+
+      // ── Onboarding priority map ───────────────────────────────────────────
+      const onboardingMap  = {};
       const claimedMembers = new Set();
       for (const nm of newMembers) {
         const step = getOnboardingStep(nm.joinDate, date);
@@ -1213,9 +1256,35 @@ export default function ToastmastersVpeAgendaEngine() {
           claimedMembers.add(nm.name);
         }
       }
+
+      // ── Speaker track: 3-meeting no-repeat cycle ──────────────────────────
+      const speakerRoles = tpl.roles.filter(r => isSpeakerRole(r));
+      const speakerCount = speakerRoles.length;
+      let speakerPool = [];
+
+      if (speakerCount > 0 && members.length > 0) {
+        // Sort: never spoken comes first, then longest-ago first (stable by original order)
+        const sorted = [...members].sort((a, b) => {
+          const la = speakerLastMeeting[a] ?? -9999;
+          const lb = speakerLastMeeting[b] ?? -9999;
+          if (la === lb) return members.indexOf(a) - members.indexOf(b);
+          return la - lb;
+        });
+        // Eligible = haven't spoken within the last 3 meetings
+        const eligible = sorted.filter(m => {
+          const last = speakerLastMeeting[m];
+          return last === undefined || (i - last) >= 3;
+        });
+        // Fall back to full sorted list if not enough eligible (everyone spoken recently)
+        const pool = eligible.length >= speakerCount ? eligible : sorted;
+        speakerPool = pool.slice(0, speakerCount);
+        // Mark these members as having spoken this meeting
+        speakerPool.forEach(m => { speakerLastMeeting[m] = i; });
+      }
+
       return {
         date, week, type:tpl.label, description:tpl.description, themePackage,
-        roles: assignRoles(tpl.roles, members, officers, i, presidingMode, onboardingMap)
+        roles: assignRoles(tpl.roles, members, officers, i, presidingMode, onboardingMap, speakerPool)
       };
     });
   }, [startDate,meetingCount,weekday,cadence,pattern,members,officers,themePool,themeStartIndex,vocabularyLevel,presidingMode,newMembers,wordBankEnabled]);
