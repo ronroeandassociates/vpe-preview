@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import {
   AlertTriangle,
   BookOpen,
@@ -860,6 +861,7 @@ function assignRoles(roles, members, officers, mi, mode, onboardingMap = {}) {
 
 // ─── CSV parsing ───────────────────────────────────────────────────────────────
 
+// Parse CSV text → { headers, rows }
 function parseCSVText(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return { headers:[], rows:[] };
@@ -871,6 +873,19 @@ function parseCSVText(text) {
   };
   const headers = parseRow(lines[0]);
   const rows = lines.slice(1).map(l=>{ const v=parseRow(l); return Object.fromEntries(headers.map((h,i)=>[h,v[i]??""])); }).filter(r=>Object.values(r).some(v=>v!==""));
+  return { headers, rows };
+}
+
+// Parse XLSX ArrayBuffer → { headers, rows } from first sheet
+function parseXLSXBuffer(buf) {
+  const wb = XLSX.read(buf, { type:"array", cellText:true, cellDates:true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(ws, { header:1, defval:"", raw:false });
+  if (raw.length < 2) return { headers:[], rows:[] };
+  const headers = raw[0].map(h => String(h).trim());
+  const rows = raw.slice(1)
+    .map(r => Object.fromEntries(headers.map((h,i) => [h, String(r[i]??'').trim()])))
+    .filter(r => Object.values(r).some(v => v !== ""));
   return { headers, rows };
 }
 
@@ -945,9 +960,12 @@ function CSVImportPanel({ onApply }) {
   const ref = useRef(null);
 
   const process = useCallback((file) => {
+    const isXlsx = /\.xlsx?$/i.test(file.name);
     const reader = new FileReader();
     reader.onload = (e) => {
-      const { headers, rows } = parseCSVText(e.target.result);
+      const { headers, rows } = isXlsx
+        ? parseXLSXBuffer(e.target.result)
+        : parseCSVText(e.target.result);
       const type = detectFileType(file.name, headers);
       let p = { name:file.name, type };
       if (type==="membership") p.members=parseMembership(rows,headers);
@@ -955,10 +973,11 @@ function CSVImportPanel({ onApply }) {
       else if (type==="schedule") { const dates=parseScheduleDates(rows,headers); p.scheduleInfo=dates.length>0?{ startDate:dates[0].toISOString().split("T")[0], meetingCount:dates.length, ...detectCadenceFromDates(dates) }:null; }
       setFiles(prev=>{ const f=type==="unknown"?prev:prev.filter(x=>x.type!==type); return [...f,p]; });
     };
-    reader.readAsText(file);
+    if (isXlsx) reader.readAsArrayBuffer(file);
+    else reader.readAsText(file);
   }, []);
 
-  const onDrop = useCallback((e)=>{ e.preventDefault(); setDragging(false); Array.from(e.dataTransfer.files).filter(f=>f.name.endsWith(".csv")).forEach(process); },[process]);
+  const onDrop = useCallback((e)=>{ e.preventDefault(); setDragging(false); Array.from(e.dataTransfer.files).filter(f=>/\.(csv|xlsx?)$/i.test(f.name)).forEach(process); },[process]);
   const onInput = useCallback((e)=>{ Array.from(e.target.files).forEach(process); e.target.value=""; },[process]);
 
   const buildPayload = () => {
@@ -978,9 +997,9 @@ function CSVImportPanel({ onApply }) {
       <div onDragOver={e=>{e.preventDefault();setDragging(true);}} onDragLeave={()=>setDragging(false)} onDrop={onDrop} onClick={()=>ref.current?.click()}
         className={`cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-colors ${dragging?"border-slate-500 bg-slate-100":"border-slate-300 hover:border-slate-400 hover:bg-slate-50"}`}>
         <FileUp size={20} className="mx-auto mb-2 text-slate-400"/>
-        <p className="text-sm font-medium text-slate-600">Drop CSVs here or click to browse</p>
-        <p className="mt-1 text-xs text-slate-400">membership · attendance · schedule</p>
-        <input ref={ref} type="file" accept=".csv" multiple onChange={onInput} className="hidden"/>
+        <p className="text-sm font-medium text-slate-600">Drop files here or click to browse</p>
+        <p className="mt-1 text-xs text-slate-400">.xlsx or .csv · membership · attendance · schedule</p>
+        <input ref={ref} type="file" accept=".csv,.xls,.xlsx" multiple onChange={onInput} className="hidden"/>
       </div>
       {files.length>0&&(
         <div className="space-y-2">
@@ -1168,7 +1187,7 @@ export default function ToastmastersVpeAgendaEngine() {
               </button>
               {importOpen&&(
                 <div className="border-t border-slate-200 p-4">
-                  <p className="mb-3 text-xs text-slate-500">Drop your TI membership export and FreeToastHost attendance/schedule CSVs. Files are detected by filename and headers — nothing leaves your browser.</p>
+                  <p className="mb-3 text-xs text-slate-500">Drop your TI membership export and FreeToastHost attendance/schedule files (.xlsx or .csv). Files are detected by filename and headers — nothing leaves your browser.</p>
                   <CSVImportPanel onApply={applyImport}/>
                 </div>
               )}
