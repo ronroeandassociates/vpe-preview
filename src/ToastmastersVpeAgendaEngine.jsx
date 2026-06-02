@@ -953,19 +953,35 @@ function detectFileType(filename, headers) {
 }
 
 // Returns { members:string[], officers:string[], newMembers:string[] }
-// Handles both TI CSV ("Name","Status (*)","Current Position","Member of Club Since")
-// and generic first/last name formats.
+// TI CSV columns used:
+//   "Name"                 → display name
+//   "Paid Until"           → PRIMARY active filter: must be >= today
+//   "Status (*)"           → secondary check (PaidMember / UnpaidMember)
+//   "Current Position"     → officer roles (comma-separated)
+//   "Member of Club Since" → join date for this club (onboarding detection, ≤40 weeks)
+//   "Original Join Date"   → total TM tenure (informational)
 function parseMembership(rows, headers) {
   const firstCol    = headers.find(h => /first.?name/i.test(h));
   const lastCol     = headers.find(h => /last.?name/i.test(h));
   const nameCol     = headers.find(h => /^name$/i.test(h));
-  const statusCol   = headers.find(h => /^status/i.test(h));          // matches "Status (*)"
+  const paidUntilCol= headers.find(h => /paid.*until|paid.*through/i.test(h)); // "Paid Until"
+  const statusCol   = headers.find(h => /^status/i.test(h));                   // "Status (*)"
   const positionCol = headers.find(h => /current.*position/i.test(h));
-  const sinceCol    = headers.find(h => /member.*since/i.test(h));    // "Member of Club Since"
+  const sinceCol    = headers.find(h => /member.*since/i.test(h));             // "Member of Club Since"
+  // "Original Join Date" — TM tenure (informational, not currently used for filtering)
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   const active = rows.filter(r => {
-    if (!statusCol) return true;
-    return /active|honorary|paidmember/i.test(r[statusCol] || "");
+    // Primary: Paid Until must exist and be >= today
+    if (paidUntilCol) {
+      const paid = new Date(r[paidUntilCol]);
+      if (!isNaN(paid)) return paid >= today;
+    }
+    // Fallback: Status (*) = PaidMember / active / honorary
+    if (statusCol) return /active|honorary|paidmember/i.test(r[statusCol] || "");
+    return true;
   });
 
   const getName = r => {
@@ -976,7 +992,7 @@ function parseMembership(rows, headers) {
 
   const members = active.map(getName).filter(Boolean);
 
-  // Build officer list from Current Position column
+  // Build officer list from Current Position column (comma-separated, e.g. "Club President")
   const officerSet = new Set();
   if (positionCol) {
     for (const r of active) {
@@ -986,14 +1002,14 @@ function parseMembership(rows, headers) {
     }
   }
 
-  // Detect new members: joined within last 6 months
-  const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  // New member detection: joined this club within last 40 weeks (full onboarding window)
+  const fortyWeeksAgo = new Date(today); fortyWeeksAgo.setDate(today.getDate() - 280);
   const newMembers = [];
   if (sinceCol) {
     for (const r of active) {
       const name = getName(r); if (!name) continue;
       const d = new Date(r[sinceCol] + "T12:00:00");
-      if (!isNaN(d) && d >= sixMonthsAgo) {
+      if (!isNaN(d) && d >= fortyWeeksAgo) {
         newMembers.push(`${name} | ${d.toISOString().split("T")[0]}`);
       }
     }
@@ -1029,16 +1045,28 @@ function parseRoleTally(rows, headers) {
   return members;
 }
 
-// FTH Schedule: col 0 = role, col 1 = member; date appears in first row col 0
-function parseFTHSchedule(rows, headers) {
-  const dates = []; const assignments = [];
-  // The raw sheet has date in row[0][0], then role:member pairs
-  // parseXLSXBuffer would have put date as a "header" key and lose it
-  // Instead we work with what we get: look for ISO dates in header keys
-  for (const h of headers) {
-    const d = new Date(h); if (!isNaN(d)) dates.push(d);
+// FTH Schedule xlsx: vertical blocks — ISO date row, then role:member pairs, repeat.
+// e.g.  ["2026-06-08",""]  ["Toastmaster","Emerson John"]  ["Speaker #1","Sandra"]  ["2026-06-15",""] …
+// Returns array of { date, roles:[{role,member}] }
+function parseFTHScheduleBlocks(rawRows) {
+  const meetings = [];
+  let current = null;
+  for (const row of rawRows) {
+    const col0 = String(row[0]||"").trim();
+    const col1 = String(row[1]||"").trim();
+    // Meeting header: col0 looks like ISO date, col1 is empty
+    if (/^\d{4}-\d{2}-\d{2}/.test(col0) && !col1) {
+      if (current) meetings.push(current);
+      current = { date: new Date(col0 + "T12:00:00"), roles: [] };
+    } else if (current && col0 && col1) {
+      // Normalise FTH role names: "Speaker #1" → "Speaker 1", strip credentials from names
+      const role   = col0.replace(/\s*#(\d)/g, " $1").replace(/\s*Introduces.*$/i,"").trim();
+      const member = col1.replace(/,\s*[A-Z]{2,4}\d*\s*$/, "").trim(); // strip "DL5", "PM1" etc
+      current.roles.push({ role, member });
+    }
   }
-  return dates.sort((a,b)=>a-b);
+  if (current) meetings.push(current);
+  return meetings;
 }
 
 function parseWideAttendance(rows, headers) {
@@ -1084,7 +1112,7 @@ function filePreviewLine(f) {
   if (f.type==="membership") return `${f.members?.length??0} active members · ${f.officers?.length??0} officers · ${f.newMembers?.length??0} new (≤6 mo)`;
   if (f.type==="roletally") return `${f.members?.length??0} members with role history`;
   if (f.type==="attendance") return `${Object.keys(f.attendanceCounts??{}).length} members tracked · ${f.format} format`;
-  if (f.type==="schedule") return f.scheduleInfo ? `${f.scheduleInfo.meetingCount} meetings · ${cadenceLabel(f.scheduleInfo.cadence)} · from ${f.scheduleInfo.startDate}` : "No date column detected";
+  if (f.type==="schedule") return f.scheduleInfo ? `${f.scheduleInfo.meetingCount} upcoming meetings · ${cadenceLabel(f.scheduleInfo.cadence)} · starting ${f.scheduleInfo.startDate}` : "No meeting dates detected";
   if (f.type==="roster") return "Loaded (officer pool support coming in Phase 6)";
   return "Type not recognised — check filename or headers";
 }
@@ -1098,11 +1126,38 @@ function CSVImportPanel({ onApply }) {
     const isXlsx = /\.xlsx?$/i.test(file.name);
     const reader = new FileReader();
     reader.onload = (e) => {
+      let type, p;
+
+      // FTH schedule xlsx: vertical date-block format — handle before generic xlsx parsing
+      if (isXlsx && /schedule/i.test(file.name)) {
+        const wb  = XLSX.read(e.target.result, { type:"array", cellText:true });
+        const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, defval:"", raw:false });
+        // Confirm FTH vertical format: first data row is an ISO date with empty col1
+        if (raw.length > 0 && /^\d{4}-\d{2}-\d{2}/.test(String(raw[0][0]||"").trim())) {
+          const meetings  = parseFTHScheduleBlocks(raw);
+          const dates     = meetings.map(m => m.date).filter(d => !isNaN(d));
+          type = "schedule";
+          p    = { name:file.name, type };
+          p.scheduleInfo = dates.length > 0
+            ? { startDate:dates[0].toISOString().split("T")[0], meetingCount:dates.length, ...detectCadenceFromDates(dates), meetings }
+            : null;
+          // First meeting's pre-committed speakers (useful for locked meeting awareness)
+          if (meetings.length > 0) {
+            p.committedSpeakers = meetings[0].roles
+              .filter(r => /speaker/i.test(r.role))
+              .map(r => r.member);
+          }
+          setFiles(prev => { const f = prev.filter(x => x.type !== type); return [...f, p]; });
+          return;
+        }
+      }
+
+      // Generic xlsx / CSV parsing
       const { headers, rows } = isXlsx
         ? parseXLSXBuffer(e.target.result)
         : parseCSVText(e.target.result);
-      const type = detectFileType(file.name, headers);
-      let p = { name:file.name, type };
+      type = detectFileType(file.name, headers);
+      p    = { name:file.name, type };
       if (type==="membership") { const m=parseMembership(rows,headers); p.members=m.members; p.officers=m.officers; p.newMembers=m.newMembers; }
       else if (type==="roletally") { const rt=parseRoleTally(rows,headers); p.members=rt.map(m=>m.name); p.roleTally=rt; }
       else if (type==="attendance") { p.format=detectAttendanceFormat(headers); p.attendanceCounts=parseAttendance(rows,headers); }
