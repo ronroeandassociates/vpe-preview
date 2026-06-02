@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
@@ -1473,21 +1473,6 @@ export default function ToastmastersVpeAgendaEngine() {
       };
     });
   }, [startDate,meetingCount,weekday,cadence,pattern,members,officers,themePool,themeStartIndex,vocabularyLevel,presidingMode,newMembers,wordBankEnabled,speakerHistory]);
-
-  // Persist updated speaker history whenever schedule rebuilds
-  useEffect(() => {
-    if (!schedule.length) return;
-    // Rebuild history from the current schedule's speaker assignments
-    const hist = { ...speakerHistory };
-    schedule.forEach((mtg, i) => {
-      mtg.roles.filter(r => isSpeakerRole(r.role) && r.member && r.member !== "Open")
-               .forEach(r => { hist[r.member] = i; });
-    });
-    // Only update state if something actually changed (avoid render loop)
-    if (JSON.stringify(hist) !== JSON.stringify(speakerHistory)) {
-      setSpeakerHistory(hist);
-    }
-  }, [schedule]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const issues = useMemo(() => {
     const w=[], rotating=["threeOneOne","hybrid","growthCycle","educationCycle","membershipCycle"];
