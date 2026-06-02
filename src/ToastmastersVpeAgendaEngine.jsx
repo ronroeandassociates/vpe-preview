@@ -1218,6 +1218,36 @@ function CSVImportPanel({ onApply }) {
   );
 }
 
+// ─── Session persistence ───────────────────────────────────────────────────────
+const SESSION_VERSION = "1.1";
+
+// Fields that are saved/loaded. Only member NAMES are persisted — no PII.
+const SESSION_FIELDS = [
+  "clubName","clubNumber","area","division","district","region","meetingLink",
+  "startDate","meetingCount","weekday","meetingTime",
+  "membersText","officersText","newMembersText",
+  "cadence","pattern","presidingMode","libraryMode","planningHorizon",
+  "themeStartIndex","vocabularyLevel","repeatWindowMonths",
+  "lockedWeeks","wordBankEnabled","campaignName","campaignNote",
+  "speakerHistory",          // { memberName: lastMeetingIndex }
+];
+
+function localKey(clubNumber) {
+  return `vpe-session-${clubNumber || "default"}`;
+}
+
+function serializeSession(state) {
+  return { version:SESSION_VERSION, savedAt:new Date().toISOString(), ...Object.fromEntries(SESSION_FIELDS.map(k=>[k,state[k]])) };
+}
+
+function deserializeSession(raw) {
+  try {
+    const s = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!s || !s.version) return null;
+    return s;
+  } catch { return null; }
+}
+
 // ─── main component ────────────────────────────────────────────────────────────
 
 export default function ToastmastersVpeAgendaEngine() {
@@ -1250,6 +1280,8 @@ export default function ToastmastersVpeAgendaEngine() {
   // PR settings
   const [campaignNote, setCampaignNote]   = useState("");
   const [campaignName, setCampaignName]   = useState("");
+  // Speaker history — persisted across sessions { memberName: lastMeetingIndex }
+  const [speakerHistory, setSpeakerHistory] = useState({});
   // PR panel open state
   const [openPR, setOpenPR]               = useState(new Set());
   const [openPROutputs, setOpenPROutputs] = useState({});
@@ -1261,6 +1293,104 @@ export default function ToastmastersVpeAgendaEngine() {
   });
 
   const clubIdentity = useMemo(() => ({ clubName, clubNumber, area, division, district, region, meetingLink }), [clubName, clubNumber, area, division, district, region, meetingLink]);
+
+  // ── Session: restore from localStorage on first load ─────────────────────────
+  const sessionLoaded = useRef(false);
+  useEffect(() => {
+    if (sessionLoaded.current) return;
+    sessionLoaded.current = true;
+    const key = localKey(clubNumber);
+    const raw = localStorage.getItem(key);
+    const s   = deserializeSession(raw);
+    if (!s) return;
+    const setters = {
+      clubName:setClubName, clubNumber:setClubNumber, area:setArea, division:setDivision,
+      district:setDistrict, region:setRegion, meetingLink:setMeetingLink,
+      startDate:setStartDate, meetingCount:setMeetingCount, weekday:setWeekday, meetingTime:setMeetingTime,
+      membersText:setMembersText, officersText:setOfficersText, newMembersText:setNewMembersText,
+      cadence:setCadence, pattern:setPattern, presidingMode:setPresidingMode,
+      libraryMode:setLibraryMode, planningHorizon:setPlanningHorizon,
+      themeStartIndex:setThemeStartIndex, vocabularyLevel:setVocabularyLevel,
+      repeatWindowMonths:setRepeatWindowMonths, lockedWeeks:setLockedWeeks,
+      wordBankEnabled:setWordBankEnabled, campaignName:setCampaignName,
+      campaignNote:setCampaignNote, speakerHistory:setSpeakerHistory,
+    };
+    for (const [k,fn] of Object.entries(setters)) { if (s[k] !== undefined) fn(s[k]); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Session: auto-save to localStorage whenever key state changes ─────────────
+  const autoSaveTimer = useRef(null);
+  useEffect(() => {
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      const snap = {
+        clubName,clubNumber,area,division,district,region,meetingLink,
+        startDate,meetingCount,weekday,meetingTime,
+        membersText,officersText,newMembersText,
+        cadence,pattern,presidingMode,libraryMode,planningHorizon,
+        themeStartIndex,vocabularyLevel,repeatWindowMonths,
+        lockedWeeks,wordBankEnabled,campaignName,campaignNote,speakerHistory,
+      };
+      localStorage.setItem(localKey(clubNumber), JSON.stringify(serializeSession(snap)));
+    }, 1500); // debounce 1.5 s
+    return () => clearTimeout(autoSaveTimer.current);
+  }, [clubName,clubNumber,area,division,district,region,meetingLink,
+      startDate,meetingCount,weekday,meetingTime,
+      membersText,officersText,newMembersText,
+      cadence,pattern,presidingMode,libraryMode,planningHorizon,
+      themeStartIndex,vocabularyLevel,repeatWindowMonths,
+      lockedWeeks,wordBankEnabled,campaignName,campaignNote,speakerHistory]);
+
+  // ── Session: download JSON file ───────────────────────────────────────────────
+  const saveSessionFile = useCallback(() => {
+    const snap = {
+      clubName,clubNumber,area,division,district,region,meetingLink,
+      startDate,meetingCount,weekday,meetingTime,
+      membersText,officersText,newMembersText,
+      cadence,pattern,presidingMode,libraryMode,planningHorizon,
+      themeStartIndex,vocabularyLevel,repeatWindowMonths,
+      lockedWeeks,wordBankEnabled,campaignName,campaignNote,speakerHistory,
+    };
+    const json = JSON.stringify(serializeSession(snap), null, 2);
+    const blob = new Blob([json], { type:"application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    const date = new Date().toISOString().split("T")[0];
+    a.href     = url;
+    a.download = `vpe-${clubNumber || "club"}-${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [clubName,clubNumber,area,division,district,region,meetingLink,
+      startDate,meetingCount,weekday,meetingTime,
+      membersText,officersText,newMembersText,
+      cadence,pattern,presidingMode,libraryMode,planningHorizon,
+      themeStartIndex,vocabularyLevel,repeatWindowMonths,
+      lockedWeeks,wordBankEnabled,campaignName,campaignNote,speakerHistory]);
+
+  // ── Session: load from uploaded JSON file ─────────────────────────────────────
+  const loadSessionFile = useCallback((file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const s = deserializeSession(e.target.result);
+      if (!s) return alert("Invalid session file.");
+      const setters = {
+        clubName:setClubName, clubNumber:setClubNumber, area:setArea, division:setDivision,
+        district:setDistrict, region:setRegion, meetingLink:setMeetingLink,
+        startDate:setStartDate, meetingCount:setMeetingCount, weekday:setWeekday, meetingTime:setMeetingTime,
+        membersText:setMembersText, officersText:setOfficersText, newMembersText:setNewMembersText,
+        cadence:setCadence, pattern:setPattern, presidingMode:setPresidingMode,
+        libraryMode:setLibraryMode, planningHorizon:setPlanningHorizon,
+        themeStartIndex:setThemeStartIndex, vocabularyLevel:setVocabularyLevel,
+        repeatWindowMonths:setRepeatWindowMonths, lockedWeeks:setLockedWeeks,
+        wordBankEnabled:setWordBankEnabled, campaignName:setCampaignName,
+        campaignNote:setCampaignNote, speakerHistory:setSpeakerHistory,
+      };
+      for (const [k,fn] of Object.entries(setters)) { if (s[k] !== undefined) fn(s[k]); }
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const sessionFileRef = useRef(null);
 
   const themePool = libraryMode === "master" ? masterPool : corePool;
 
@@ -1290,8 +1420,8 @@ export default function ToastmastersVpeAgendaEngine() {
   const schedule = useMemo(() => {
     const dates = getNextDates(startDate, Number(meetingCount), Number(weekday), cadence);
     const usedWordIds   = new Set();
-    // Speaker track state: persists across meetings within this schedule build
-    const speakerLastMeeting = {}; // member → meeting index of last speaking slot
+    // Speaker track: start from persisted history, then track within this build
+    const speakerLastMeeting = { ...speakerHistory };
 
     return dates.map((date, i) => {
       const week = ordinalWeekOfMonth(date);
@@ -1342,7 +1472,22 @@ export default function ToastmastersVpeAgendaEngine() {
         roles: assignRoles(tpl.roles, members, officers, i, presidingMode, onboardingMap, speakerPool)
       };
     });
-  }, [startDate,meetingCount,weekday,cadence,pattern,members,officers,themePool,themeStartIndex,vocabularyLevel,presidingMode,newMembers,wordBankEnabled]);
+  }, [startDate,meetingCount,weekday,cadence,pattern,members,officers,themePool,themeStartIndex,vocabularyLevel,presidingMode,newMembers,wordBankEnabled,speakerHistory]);
+
+  // Persist updated speaker history whenever schedule rebuilds
+  useEffect(() => {
+    if (!schedule.length) return;
+    // Rebuild history from the current schedule's speaker assignments
+    const hist = { ...speakerHistory };
+    schedule.forEach((mtg, i) => {
+      mtg.roles.filter(r => isSpeakerRole(r.role) && r.member && r.member !== "Open")
+               .forEach(r => { hist[r.member] = i; });
+    });
+    // Only update state if something actually changed (avoid render loop)
+    if (JSON.stringify(hist) !== JSON.stringify(speakerHistory)) {
+      setSpeakerHistory(hist);
+    }
+  }, [schedule]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const issues = useMemo(() => {
     const w=[], rotating=["threeOneOne","hybrid","growthCycle","educationCycle","membershipCycle"];
@@ -1388,9 +1533,23 @@ export default function ToastmastersVpeAgendaEngine() {
                 Generate repeatable agenda schedules with cadence control, format patterns, officer-aware presiding logic, member rotation, and a 72-month theme/vocabulary master library.
               </p>
             </div>
-            <button onClick={exportText} style={{backgroundColor:TM.maroon}} className="inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold text-white shadow-sm hover:opacity-90 transition-opacity">
-              <Download size={16}/> Copy Schedule
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Session save / load */}
+              <input ref={sessionFileRef} type="file" accept=".json" className="hidden"
+                onChange={e=>{ if(e.target.files[0]) { loadSessionFile(e.target.files[0]); e.target.value=""; } }}/>
+              <button onClick={()=>sessionFileRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors">
+                <Download size={14}/> Load Session
+              </button>
+              <button onClick={saveSessionFile}
+                className="inline-flex items-center gap-1.5 rounded-2xl border px-4 py-2.5 text-sm font-semibold shadow-sm hover:opacity-90 transition-opacity"
+                style={{backgroundColor:TM.maroonLight, color:TM.maroon, borderColor:TM.maroon}}>
+                💾 Save Session
+              </button>
+              <button onClick={exportText} style={{backgroundColor:TM.maroon}} className="inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold text-white shadow-sm hover:opacity-90 transition-opacity">
+                <Download size={16}/> Copy Schedule
+              </button>
+            </div>
           </div>
         </motion.header>
 
@@ -1398,6 +1557,11 @@ export default function ToastmastersVpeAgendaEngine() {
 
           {/* ── sidebar ── */}
           <aside className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-1">
+
+            {/* Privacy notice */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+              🔒 <strong>Data stays local.</strong> Member names are stored only in your browser and session files. No data is sent to any server. Email, phone, and address fields from membership imports are discarded immediately.
+            </div>
 
             {/* CSV Import */}
             <div className="rounded-xl border border-slate-200 bg-slate-50">
