@@ -1474,6 +1474,32 @@ export default function ToastmastersVpeAgendaEngine() {
     });
   }, [startDate,meetingCount,weekday,cadence,pattern,members,officers,themePool,themeStartIndex,vocabularyLevel,presidingMode,newMembers,wordBankEnabled,speakerHistory]);
 
+  // ── Roll Forward Engine ─────────────────────────────────────────────────────
+  // Placed after schedule/themePool are defined to avoid TDZ reference errors.
+  const [rollConfirm, setRollConfirm] = useState(false);
+
+  const rollForward = useCallback(() => {
+    if (schedule.length < 2) return;
+    const completedMeeting  = schedule[0];
+    const newStartDate      = schedule[1].date.toISOString().split("T")[0];
+    const newThemeStart     = (Number(themeStartIndex) + 1) % themePool.length;
+
+    // Shift every speaker's last-meeting index down by 1 (window moves forward)
+    const newSpeakerHistory = {};
+    for (const [m, idx] of Object.entries(speakerHistory)) {
+      newSpeakerHistory[m] = Number(idx) - 1;
+    }
+    // Capture speakers from the meeting just completed (mark as spoke at -1)
+    completedMeeting.roles
+      .filter(r => isSpeakerRole(r.role) && r.member && r.member !== "Open")
+      .forEach(r => { if (!(r.member in newSpeakerHistory)) newSpeakerHistory[r.member] = -1; });
+
+    setStartDate(newStartDate);
+    setThemeStartIndex(newThemeStart);
+    setSpeakerHistory(newSpeakerHistory);
+    setRollConfirm(false);
+  }, [schedule, themeStartIndex, themePool, speakerHistory]);
+
   const issues = useMemo(() => {
     const w=[], rotating=["threeOneOne","hybrid","growthCycle","educationCycle","membershipCycle"];
     if (!clubName.trim()) w.push("Club name is missing.");
@@ -1531,10 +1557,42 @@ export default function ToastmastersVpeAgendaEngine() {
                 style={{backgroundColor:TM.maroonLight, color:TM.maroon, borderColor:TM.maroon}}>
                 💾 Save Session
               </button>
+              {/* Roll Forward */}
+              <button onClick={()=>setRollConfirm(true)}
+                className="inline-flex items-center gap-1.5 rounded-2xl border px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
+                style={{backgroundColor:"#1d4ed8"}}>
+                ⏩ Roll Forward
+              </button>
               <button onClick={exportText} style={{backgroundColor:TM.maroon}} className="inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold text-white shadow-sm hover:opacity-90 transition-opacity">
                 <Download size={16}/> Copy Schedule
               </button>
             </div>
+
+            {/* Roll Forward confirmation dialog */}
+            {rollConfirm&&schedule.length>=2&&(
+              <motion.div initial={{opacity:0,y:-8}} animate={{opacity:1,y:0}}
+                className="mt-4 rounded-2xl border-2 border-blue-300 bg-blue-50 p-5 shadow-sm">
+                <p className="font-bold text-blue-900">⏩ Roll Forward — Confirm</p>
+                <div className="mt-2 space-y-1 text-sm text-blue-800">
+                  <p>✓ Archive <strong>{formatDate(schedule[0].date)}</strong> — <em>{schedule[0].themePackage.theme}</em></p>
+                  <p>✓ Meetings 2–5 shift to positions 1–4</p>
+                  <p>✓ New Meeting 5 generated from current settings</p>
+                  <p>✓ Speaker rotation updated — anyone who spoke on meeting 1 ineligible for 3 meetings</p>
+                  <p>✓ Theme index advances by 1</p>
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <button onClick={rollForward}
+                    className="rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+                    style={{backgroundColor:"#1d4ed8"}}>
+                    Confirm Roll Forward
+                  </button>
+                  <button onClick={()=>setRollConfirm(false)}
+                    className="rounded-xl border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-50">
+                    Cancel
+                  </button>
+                </div>
+              </motion.div>
+            )}
           </div>
         </motion.header>
 
